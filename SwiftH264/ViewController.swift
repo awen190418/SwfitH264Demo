@@ -10,7 +10,9 @@ import UIKit
 import VideoToolbox
 import AVFoundation
 
-class ViewController: UIViewController {
+class ViewController: UIViewController, CameraConnectionListener {
+
+    
     
     var formatDesc: CMVideoFormatDescription?
     var decompressionSession: VTDecompressionSession?
@@ -21,17 +23,22 @@ class ViewController: UIViewController {
     
     var sps: Array<UInt8>?
     var pps: Array<UInt8>?
+    
+    var nalu_data:Array<UInt8> = []
+    let NALU_MAXLEN = 1024 * 1024;
+    var nalu_search_state = 0
+    var nalu_data_position = 0
 
 
     override func viewDidLoad() {
         super.viewDidLoad()
         // Do any additional setup after loading the view, typically from a nib.
-        
+        nalu_data = Array<UInt8>.init(repeating: 0, count: NALU_MAXLEN)
         videoLayer = AVSampleBufferDisplayLayer()
         
         if let layer = videoLayer {
             layer.frame = CGRect(x: 0, y: 400, width: 300, height: 300)
-            layer.videoGravity = AVLayerVideoGravityResizeAspect
+            layer.videoGravity = AVLayerVideoGravity.resizeAspect
             
             
             let _CMTimebasePointer = UnsafeMutablePointer<CMTimebase?>.allocate(capacity: 1)
@@ -50,11 +57,22 @@ class ViewController: UIViewController {
     }
 
     @IBAction func startClicked(_ sender: UIButton) {
-        DispatchQueue.global().async {
-            let filePath = Bundle.main.path(forResource: "mtv", ofType: "h264")
+        /*DispatchQueue.global().async {
+            let filePath = Bundle.main.path(forResource: "temp", ofType: "h264")
             let url = URL(fileURLWithPath: filePath!)
             self.decodeFile(url)
+        }*/
+        let cameraConnection = CameraConnection(queue: DispatchQueue.init(label: "video"))
+        cameraConnection.setListener(self)
+        cameraConnection.startStreaming()
+        
+    }
+    
+    func receiveStreamData(data: Data, size: Int) {
+        var array = data.withUnsafeBytes{
+            [UInt8](UnsafeBufferPointer(start: $0, count: data.count))
         }
+        parseDatagram(array, size: array.count)
     }
     
     func decodeFile(_ fileURL: URL) {
@@ -68,8 +86,52 @@ class ViewController: UIViewController {
         
     }
     
+    func parseDatagram(_ d:Array<UInt8>,size:Int){
+        var n = 0
+        while(n < size ){
+            
+            nalu_data[nalu_data_position] = d[n]
+           
+            if(nalu_data_position == NALU_MAXLEN - 1){
+                nalu_data_position = 0;
+                print("NALU overflow")
+            }
+            nalu_data_position += 1
+            switch nalu_search_state{
+                case 0...2:
+                    if d[n] == 0{
+                        nalu_search_state += 1
+                    }
+                    else{
+                        nalu_search_state = 0
+                    }
+                break
+                case 3:
+                
+                    if(d[n] == 1){
+                        nalu_data[0] = 0
+                        nalu_data[1] = 0
+                        nalu_data[2] = 0
+                        nalu_data[3] = 1
+                        print("NALU data send to decode")
+                        receivedRawVideoFrame(&nalu_data)
+                        
+                        nalu_data_position = 4
+                    }
+                    nalu_search_state = 0
+                break
+            default:
+                break
+            }
+            n += 1
+           
+        }
+    }
+
+    
     func receivedRawVideoFrame(_ videoPacket: inout VideoPacket) {
         
+        let position = nalu_data_position - 4
         //replace start code with nal size
         var biglen = CFSwapInt32HostToBig(UInt32(videoPacket.count - 4))
         memcpy(&videoPacket, &biglen, 4)
@@ -84,12 +146,12 @@ class ViewController: UIViewController {
             }
         case 0x07:
             print("Nal type is SPS")
-            spsSize = videoPacket.count - 4
-            sps = Array(videoPacket[4..<videoPacket.count])
+            spsSize = position - 4
+            sps = Array(videoPacket[4..<position])
         case 0x08:
             print("Nal type is PPS")
-            ppsSize = videoPacket.count - 4
-            pps = Array(videoPacket[4..<videoPacket.count])
+            ppsSize = position - 4
+            pps = Array(videoPacket[4..<position])
         default:
             print("Nal type is B/P frame")
             decodeVideoPacket(videoPacket)
@@ -100,7 +162,6 @@ class ViewController: UIViewController {
     }
 
     func decodeVideoPacket(_ videoPacket: VideoPacket) {
-        
         let bufferPointer = UnsafeMutablePointer<UInt8>(mutating: videoPacket)
         
         var blockBuffer: CMBlockBuffer?
