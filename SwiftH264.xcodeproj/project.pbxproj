@@ -346,6 +346,7 @@
 			baseConfigurationReference = 8AFAC0EBA85BD8E6E65015CF /* Pods-SwiftH264.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = MMBBEPT3ET;
 				INFOPLIST_FILE = SwiftH264/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
@@ -361,6 +362,7 @@
 			baseConfigurationReference = 2FA92DFC5EFF176ADC636B85 /* Pods-SwiftH264.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = MMBBEPT3ET;
 				INFOPLIST_FILE = SwiftH264/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 12.0;

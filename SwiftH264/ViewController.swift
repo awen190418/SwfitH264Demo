@@ -10,6 +10,11 @@ import UIKit
 import VideoToolbox
 import AVFoundation
 
+struct NALUPacket {
+    var data:Array<UInt8>
+    var count:Int32
+}
+
 class ViewController: UIViewController, CameraConnectionListener {
 
     
@@ -25,9 +30,11 @@ class ViewController: UIViewController, CameraConnectionListener {
     var pps: Array<UInt8>?
     
     var nalu_data:Array<UInt8> = []
+    var naluList: Array<Array<UInt8>> = []
     let NALU_MAXLEN = 1024 * 1024;
     var nalu_search_state = 0
     var nalu_data_position = 0
+    var timer = Timer.init()
 
 
     override func viewDidLoad() {
@@ -53,7 +60,9 @@ class ViewController: UIViewController, CameraConnectionListener {
             self.view.layer.addSublayer(layer)
     
         }
+        
 
+        
     }
 
     @IBAction func startClicked(_ sender: UIButton) {
@@ -65,6 +74,16 @@ class ViewController: UIViewController, CameraConnectionListener {
         let cameraConnection = CameraConnection(queue: DispatchQueue.init(label: "video"))
         cameraConnection.setListener(self)
         cameraConnection.startStreaming()
+        
+        //timer =  Timer.scheduledTimer(withTimeInterval: 0.03333, repeats: true, block: { _ in
+        while(true){
+            if self.naluList.count > 0 {
+                var array = self.naluList.removeFirst()
+                self.receivedRawVideoFrame(&array)
+            }
+        }
+
+        //})
         
     }
     
@@ -114,8 +133,9 @@ class ViewController: UIViewController, CameraConnectionListener {
                         nalu_data[2] = 0
                         nalu_data[3] = 1
                         print("NALU data send to decode")
-                        receivedRawVideoFrame(&nalu_data)
-                        
+                        if (nalu_data_position - 4) != 0 {
+                            naluList.append(Array(nalu_data[0..<(nalu_data_position - 4)]))
+                        }
                         nalu_data_position = 4
                     }
                     nalu_search_state = 0
@@ -130,11 +150,13 @@ class ViewController: UIViewController, CameraConnectionListener {
 
     
     func receivedRawVideoFrame(_ videoPacket: inout VideoPacket) {
-        
-        let position = nalu_data_position - 4
+        let position = videoPacket.count
         //replace start code with nal size
-        var biglen = CFSwapInt32HostToBig(UInt32(videoPacket.count - 4))
-        memcpy(&videoPacket, &biglen, 4)
+        if position != 0 {
+            var biglen = CFSwapInt32HostToBig(UInt32(position - 4))
+            memcpy(&videoPacket, &biglen, 4)
+        }
+
         
         let nalType = videoPacket[4] & 0x1F
         
@@ -158,16 +180,19 @@ class ViewController: UIViewController, CameraConnectionListener {
             break;
         }
         
-        print("Read Nalu size \(videoPacket.count)");
+        print("Read Nalu size \(position)");
     }
 
     func decodeVideoPacket(_ videoPacket: VideoPacket) {
+        
+        let position = videoPacket.count
+        
         let bufferPointer = UnsafeMutablePointer<UInt8>(mutating: videoPacket)
         
         var blockBuffer: CMBlockBuffer?
-        var status = CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault,bufferPointer, videoPacket.count,
+        var status = CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault,bufferPointer, position,
                                                         kCFAllocatorNull,
-                                                        nil, 0, videoPacket.count,
+                                                        nil, 0, position,
                                                         0, &blockBuffer)
         
         if status != kCMBlockBufferNoErr {
@@ -175,7 +200,7 @@ class ViewController: UIViewController, CameraConnectionListener {
         }
         
         var sampleBuffer: CMSampleBuffer?
-        let sampleSizeArray = [videoPacket.count]
+        let sampleSizeArray = [position]
         
         status = CMSampleBufferCreateReady(kCFAllocatorDefault,
                                            blockBuffer,
